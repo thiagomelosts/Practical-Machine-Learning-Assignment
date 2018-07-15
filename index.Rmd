@@ -1,0 +1,120 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Thiago Melo"
+date: "7/14/2018"
+output: html_document
+---
+
+##Introduction
+This assignment has as main goal the creation of a machine learning algorithm which uses data from wearable devices such as Jawbone Up, Nike FuelBand, and Fitbit to predict one of the 5 fashions in which a Unilateral Dumbbell Biceps Curl exercise is been performed:
+
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E)
+
+The dataset is available through:
+
+*Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.*
+
+##Data
+
+Two datasets will be loaded: **data** for the algorithm itself and **data_quiz** for the quiz predictions of the Practical Machine Learning course:
+
+```{r setup, warning=FALSE, message=FALSE}
+data <- read.csv("~/Documents/Atual/R/Coursera/pml-training.csv")
+data_quiz <- read.csv("~/Documents/Atual/R/Coursera/pml-testing.csv")
+```
+
+Next step is cleaning **data** in order to remove all the columns with mostly empty cells and the first lines that contain information such as subject, which shouldn't be useful for the model. Next, we can create two datasets, **train** and **test** from **data**, in order to train and test the algorithm and measure the out of sample error. Finally, we clean **data_quiz** to **quiz**:
+
+```{r data_clean, warning=FALSE, message=FALSE}
+data_clean <- data[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+library(caret)
+set.seed(1618)
+inTrain <- createDataPartition(1:nrow(data_clean), p = 0.75, list = FALSE)
+train <- data_clean[inTrain,]
+test <- data_clean[-inTrain,]
+quiz <- data_quiz[,-c(1:7,12:36,50:59,69:83,87:101,103:112,125:139,141:150)]
+```
+
+##Cross-validation
+
+In order to perform cross-validation and increase the speed of the **train** function from the **caret** package, we can use the **parallel** package and the **trainControl** function as described by Len Greski in his article *Improving Performance of Random Forest in caret::train()*, that can be found at:
+
+*https://github.com/lgreski/datasciencectacontent/blob/master/markdown/pml-randomForestPerformance.md*
+
+Following his, we create the **fitControl** object that indicates to the **train** function to perform a k-fold cross-validation with 5 folds:
+
+```{r parallel, warning=FALSE, message=FALSE}
+library(parallel)
+library(doParallel)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE)
+```
+
+##Models and accuracy:
+
+Three models were selected due to their general applicability, relative simplicity and increasing degrees of expected accuracy: a decision tree (**rpart**), a generalized boosted regression (**gbm**) and a random forest (**rf**). For each model, their accuracy in predicting the **classe** variable in the **train** dataset is measured, in order to select the best model for testing using the **test** dataset:
+
+###Decision tree
+
+```{r decision_tree, warning=FALSE, message=FALSE}
+fit_dt <- train(classe ~ ., data = train, method = "rpart", trControl = fitControl)
+cm_dt <- confusionMatrix(train$classe, predict(fit_dt, train))
+cm_dt$overall[1]
+```
+
+The accuracy is 49.8%, which is not very good.
+
+###Generalized boosted regression
+
+```{r gbm, warning=FALSE, message=FALSE}
+fit_gbm <- train(classe ~ ., data = train, method = "gbm", trControl = fitControl)
+cm_gbm <- confusionMatrix(train$classe, predict(fit_gbm, train))
+cm_gbm$overall[1]
+```
+
+The accuracy is 97.3%, which is very good.
+
+###Randon Forest
+
+```{r random_forest, warning=FALSE, message=FALSE}
+fit_rf <- train(classe ~ ., data = train, method = "rf", trControl = fitControl)
+cm_rf <- confusionMatrix(train$classe, predict(fit_rf, train))
+cm_rf$overall[1]
+```
+
+The accuracy is 100%, which could not be better.
+
+##Testing and out of sample error
+
+From the three models tested, the random forest algorithm seems to be the best, with the highest accuracy. But it is important to remember that this accuracy is related to values that the algorithm has already seen and was based upon them. The really high values could be due to overfitting. Therefore, we need to perform an accuracy test in unseen data, or the **test** dataset, but only for the best algorithm, the random forest.
+
+```{r test, warning=FALSE, message=FALSE}
+cm_test <- confusionMatrix(test$classe, predict(fit_rf, test))
+cm_test$overall[1]
+```
+
+The accuracy is still very high: 99.2%. Therefore, the **out of sample error is 0.75%** and
+we are confident to select this algorithm to perform the prediction for the quiz. 
+
+##Quiz
+
+We can now use the **quiz** dataset to predict the **classe** variable for the 20 cases in the quiz, using our random forest algorithm **fit_rf**:
+
+```{r quiz, warning=FALSE, message=FALSE}
+quiz_pred <- predict(fit_rf,quiz)
+quiz_pred
+```
+
+##Closing
+
+Finally, we can de-register the parallel processing cluster and return R to its original state of processing:
+
+```{r stop, warning=FALSE, message=FALSE}
+stopCluster(cluster)
+registerDoSEQ()
+```
